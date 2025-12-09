@@ -1,0 +1,7 @@
+streamlit==1.45.1
+requests==2.32.3
+folium~=0.20.0
+streamlit_folium~=0.25.3
+black~=25.11.0
+isort~=7.0.0
+flake8~=7.3.0
