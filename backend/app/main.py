@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+import dataclasses
+import json
 import logging
 import os
+import shutil
 from contextlib import asynccontextmanager
 from typing import Union
 
@@ -21,6 +24,7 @@ from train.train import get_exp_name, train_model
 from .models import (
     AddDataRequest,
     AddDataResponse,
+    DeployResponse,
     ErrorResponse,
     MetadataResponse,
     MetricsResponse,
@@ -35,14 +39,10 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-model_config = ModelConfig(
-    model_path="data/model/model_v1.onnx",
-    tokenizer_path="data/tokenizers/tokenizer_v1",
-)
-train_config = TrainConfig(
-    csv_save_path="data/actual_ds.csv",
-    output_path="train/data",
-)
+with open(os.path.join("data", "configs", "model_config.json"), "r") as file:
+    model_config = ModelConfig(**json.load(file))
+with open(os.path.join("data", "configs", "train_config.json"), "r") as file:
+    train_config = TrainConfig(**json.load(file))
 
 
 @asynccontextmanager
@@ -257,6 +257,54 @@ async def get_metrics(
         raise HTTPException(status_code=500, detail="Experiment not found")
     except Exception as e:
         logger.error(f"Unexpected error in getting metrics: {str(e)}")
+        raise HTTPException(status_code=500, detail="Server error")
+
+
+@app.post(
+    "/deploy/{experiment_id}",
+    response_model=DeployResponse,
+    responses={"500": {"model": ErrorResponse}},
+    tags=["GeoAkinator"],
+)
+def deploy_model(experiment_id: int) -> Union[DeployResponse, ErrorResponse]:
+    """
+    Deploy model with experiment id
+    """
+    try:
+        logger.info(f"Processing deploy model {experiment_id}")
+        new_model_path = os.path.join(
+            "train", "data", f"model_v{experiment_id}", f"model_v{experiment_id}.onnx"
+        )
+        dst_path = os.path.join(*model_config.model_path.split("/")[:-1])
+        if (
+            os.path.join(dst_path, f"model_v{experiment_id}.onnx")
+            != model_config.model_path
+        ):
+            shutil.copy(new_model_path, dst_path)
+            shutil.copy(new_model_path + ".data", dst_path)
+
+            os.remove(model_config.model_path)
+            os.remove(model_config.model_path + ".data")
+        else:
+            raise Exception(f"Model v{experiment_id} already deployed")
+        model_config.model_path = os.path.join(dst_path, f"model_v{experiment_id}.onnx")
+        logger.info("Model files replaced")
+        with open(os.path.join("data", "configs", "model_config.json"), "w") as file:
+            json.dump(dataclasses.asdict(model_config), file)
+        with open(os.path.join("data", "configs", "train_config.json"), "w") as file:
+            json.dump(dataclasses.asdict(train_config), file)
+
+        logger.info("New model config saved. Restarting model...")
+
+        app.state.model = GeoAkinatorModelOnnx(
+            model_config.model_path, model_config.tokenizer_path
+        )
+
+        logger.info("Model is ready")
+        return DeployResponse(status=Status.success)
+
+    except Exception as e:
+        logger.error(f"Problems with deploying model: {str(e)}")
         raise HTTPException(status_code=500, detail="Server error")
 
 

@@ -89,3 +89,7 @@ class RetrainResponse(BaseModel):
 class MetricsResponse(BaseModel):
     status: Status = Field(..., description="Metadata status", examples=["success"])
     metrics_link: str = Field(..., description="Link for tensorboard with metrics")
+
+
+class DeployResponse(BaseModel):
+    status: Status = Field(..., description="Metadata status", examples=["success"])
