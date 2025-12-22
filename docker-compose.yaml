@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  geoakinator-backend:
+    runtime: nvidia
+    build:
+      context: ./
+      dockerfile: ./Dockerfile-backend
+      args:
+        CONTEXT: runtime
+    container_name: geoakinator-backend
+    environment:
+      - TZ=MSK
+      - DATABASE_URL=postgresql+asyncpg://user:password@geoakinator-db:5432/geoakinatordb
+      - GIT_COMMIT_HASH=${GIT_COMMIT_HASH:-unknown}
+      - TENSORBOARD_START_PORT=${TENSORBOARD_START_PORT}
+      - TENSORBOARD_END_PORT=${TENSORBOARD_END_PORT}
+    volumes:
+      - ./backend:/app
+    ipc: host
+    ports:
+      - "8060:8060"
+      - "${TENSORBOARD_START_PORT}-${TENSORBOARD_END_PORT}:${TENSORBOARD_START_PORT}-${TENSORBOARD_END_PORT}"
+    networks:
+      - geoakinator-network
+    command: > 
+      /bin/bash -c "python -m app.main"
+    restart: unless-stopped
+
+  geoakinator-frontend:
+    build:
+      context: ./
+      dockerfile: ./Dockerfile-frontend
+    container_name: geoakinator-frontend
+    ports:
+      - "8777:8777"
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - geoakinator-backend
+    environment:
+      - BACKEND_URL=http://geoakinator-backend:8060
+    networks:
+      - geoakinator-network
+    restart: unless-stopped
+
+  geoakinator-db:
+    image: postgres:16
+    container_name: geoakinator-db
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: geoakinatordb
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./backend/train/data/full_markup.csv:/docker-entrypoint-initdb.d/full_markup.csv:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - geoakinator-network
+networks:
+  geoakinator-network:
+    driver: bridge
+
+volumes:
+  db_data:
